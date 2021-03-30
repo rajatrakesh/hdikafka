@@ -132,4 +132,123 @@ wn0-hdiscb.fuxxxxxxdlujcxxxxxaid.bx.internal.cloudapp.net:9092,wn1-hdiscb.fuxxxx
 
 In this scenario, our customer already has a Kafka deployment on-premises that they want to replicate messages from. In this tutorial, we will simulate this by deploying Kafka on an Azure VM and setup replication from this Kafka instance to the HDI Kafka that we have deployed above. 
 
-An important consideration here is also for Eventhub, as an option for Azure HDI Kafka. Eventhub is also able to get data from a Kafka instance, with the additional benefits of then being able to store this data in ADLS and/or leveraging Stream Analytics to then integrate with the stream
+An important consideration here is also for Eventhub, as an option for Azure HDI Kafka. Eventhub is also able to get data from a Kafka instance, with the additional benefits of then being able to store this data in ADLS and/or leveraging Stream Analytics to then integrate with the stream.
+
+Let's start with deploying a VM on Azure. For this, an ideal option is the OpenLogic Centos VM (7.5) V1. Since we wouldn't be doing much heavy lifting here, we can use the Standard B2ms shape for it, without any replication. 
+
+Deploy the VM using marketplace.
+
+![](./images/config_onprem_kafka_1.jpg)
+
+Keep all settings as default and click 'Review + Create'.
+
+![](./images/config_onprem_kafka_2.jpg)
+
+Once the VM is deployed, we'll connect to using ssh and install Kafka from command line. 
+
+Download the latest Kafka and extract it:
+
+```
+wget https://apachemirror.sg.wuchna.com/kafka/2.7.0/kafka_2.13-2.7.0.tgz
+
+tar -xzf kafka_2.13-2.7.0.tgz
+```
+
+Install Java 8+
+
+```
+sudo yum install java-1.8.0-openjdk
+```
+
+Validate Java Install:
+
+```
+java -version
+openjdk version "1.8.0_282"
+OpenJDK Runtime Environment (build 1.8.0_282-b08)
+OpenJDK 64-Bit Server VM (build 25.282-b08, mixed mode)
+```
+
+Configure JAVA_HOME
+
+```
+#Find the Java Path
+update-alternatives --config java
+
+
+There is 1 program that provides 'java'.
+
+  Selection    Command
+-----------------------------------------------
+*+ 1           java-1.8.0-openjdk.x86_64 (/usr/lib/jvm/java-1.8.0-openjdk-1.8.0.282.b08-1.el7_9.x86_64/jre/bin/java)
+
+Enter to keep the current selection[+], or type selection number:
+
+#Update .bash_profile and add JAVA_HOME
+export JAVA_HOME=/usr/lib/jvm/java-1.8.0-openjdk-1.8.0.282.b08-1.el7_9.x86_64/jre
+
+#Save the file and source it
+source .bash_profile
+
+echo $JAVA_HOME
+```
+
+Start the Kafka environment:
+
+```
+cd kafka_2.13-2.7.0
+
+# Start the ZooKeeper service
+$ bin/zookeeper-server-start.sh config/zookeeper.properties
+```
+
+Then open another terminal session and run:
+
+```
+cd kafka_2.13-2.7.0
+
+# Start the Kafka broker service
+$ bin/kafka-server-start.sh config/server.properties
+```
+
+All services started !
+
+![](./images/config_onprem_kafka_3.jpg)
+
+Let's create a topic to store events (open another terminal):
+
+```
+cd kafka_2.13-2.7.0
+
+bin/kafka-topics.sh --create --topic quickstart-events --bootstrap-server localhost:9092
+
+Created topic quickstart-events.
+```
+
+Let's validate the partition count of the new topic:
+
+```
+bin/kafka-topics.sh --describe --topic quickstart-events --bootstrap-server localhost:9092
+
+Topic: quickstart-events        PartitionCount: 1       ReplicationFactor: 1    Configs: segment.bytes=1073741824
+        Topic: quickstart-events        Partition: 0    Leader: 0       Replicas: 0     Isr: 0
+```
+
+Let's send some data to this topic with a console producer. (Ctrl+C to exit)
+
+```
+bin/kafka-console-producer.sh --topic quickstart-events --bootstrap-server localhost:9092
+This is Event 1
+This is Event 2
+
+```
+
+Let's read this back from the console consumer:
+
+```
+bin/kafka-console-consumer.sh --topic quickstart-events --from-beginning --bootstrap-server localhost:9092
+This is Event 1
+This is Event 2
+^CProcessed a total of 2 messages
+```
+
