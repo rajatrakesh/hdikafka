@@ -30,6 +30,8 @@ Once all validations have succeeded, the cluster will get created. This deployme
 
 ![](./images/deploy_hdi_3.jpg)
 
+
+
 ### Access and configure Kafka on HDI post deployment
 
 Once our cluster is successfully deployed, we can connect to the cluster using the ssh command.  Edit the command below by replacing the name of the cluster and then enter the command. 
@@ -126,7 +128,7 @@ wn0-hdiscb.fuxxxxxxdlujcxxxxxaid.bx.internal.cloudapp.net:9092,wn1-hdiscb.fuxxxx
 
 
 
-Setup On-Prem Kafka
+### Setup On-Prem Kafka
 
 In this scenario, our customer already has a Kafka deployment on-premises that they want to replicate messages from. In this tutorial, we will simulate this by deploying Kafka on an Azure VM and setup replication from this Kafka instance to the HDI Kafka that we have deployed above. 
 
