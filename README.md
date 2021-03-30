@@ -7,6 +7,7 @@ In this tutorial, we would be going through the following steps:
 * Deploy Azure HDI (Kafka)
 * Access and configure Kafka on HDI post deployment
 * Setup On-prem Kafka Instance (this will be simulated with installing Kafka in a VM)
+* Configure MirrorMaker for replication of Kafka Events
 * Deploy Databricks Cluster
 * Setup a sample spark code to read from the HDI Kafka instance
 
@@ -250,5 +251,49 @@ bin/kafka-console-consumer.sh --topic quickstart-events --from-beginning --boots
 This is Event 1
 This is Event 2
 ^CProcessed a total of 2 messages
+```
+
+Reference: [Apache Kafka](https://kafka.apache.org/quickstart)
+
+### Configure MirrorMaker for replication of Kafka Events
+
+Kafka MirrorMaker allows for the "mirroring" of a stream. Given source and destination Kafka clusters, MirrorMaker will ensure any messages sent to the source cluster will be received by both the source *and* destination clusters. In this example, we'll show how to mirror a source Kafka cluster with a destination Kafka-enabled Event Hub. This scenario can be used to send data from an existing Kafka pipeline to Event Hubs without interrupting the flow of data.
+
+Check out the [Kafka Mirroring/MirrorMaker Guide](https://cwiki.apache.org/confluence/pages/viewpage.action?pageId=27846330) for more detailed information on Kafka MirrorMaker. 
+
+Reference: Additional tutorial for setting up mirrormaker to replicate from Kafka to Event Hub is available [here](https://github.com/Azure/azure-event-hubs-for-kafka/tree/master/tutorials/mirror-maker)
+
+#### Configuration
+
+To configure Kafka MirrorMaker, we'll give it a Kafka cluster as its consumer/source and a Kafka-HDI cluster as its producer/destination.
+
+Consumer configuration:
+
+Update the consumer configuration file `source-kafka.config`, which tells MirrorMaker the properties of the source Kafka cluster.
+
+source-kafka.config
+
+```
+sdfsd
+
+```
+
+Producer Configuration
+
+Now update the producer config file `mirror-hdikafka.config`, which tells MirrorMaker to send the duplicated (or "mirrored") data to the HDI Kafka service. Specifically change `bootstrap.servers` 
+
+mirror-hdikafka.config
+
+```
+
+
+```
+
+Run MirrorMaker
+
+Run the Kafka MirrorMaker script from the root Kafka directory using the newly updated configuration files. Make sure to update the path of the config files (or copy them to the root Kafka directory) in the following command.
+
+```
+bin/kafka-mirror-maker.sh --consumer.config source-kafka.config --num.streams 1 --producer.config mirror-hdikafka.config --whitelist=".*"
 ```
 
