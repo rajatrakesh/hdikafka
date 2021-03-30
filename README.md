@@ -124,3 +124,10 @@ echo $KAFKABROKERS
 wn0-hdiscb.fuxxxxxxdlujcxxxxxaid.bx.internal.cloudapp.net:9092,wn1-hdiscb.fuxxxxxxdlujcxxxxxaid.bx.internal.cloudapp.net:9092
 ```
 
+
+
+Setup On-Prem Kafka
+
+In this scenario, our customer already has a Kafka deployment on-premises that they want to replicate messages from. In this tutorial, we will simulate this by deploying Kafka on an Azure VM and setup replication from this Kafka instance to the HDI Kafka that we have deployed above. 
+
+An important consideration here is also for Eventhub, as an option for Azure HDI Kafka. Eventhub is also able to get data from a Kafka instance, with the additional benefits of then being able to store this data in ADLS and/or leveraging Stream Analytics to then integrate with the stream
