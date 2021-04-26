@@ -5,11 +5,52 @@ In this tutorial, we will be exploring the use case for running Kafka on Azure H
 In this tutorial, we would be going through the following steps:
 
 * Deploy Azure HDI (Kafka)
+
 * Access and configure Kafka on HDI post deployment
+
 * Setup On-prem Kafka Instance (this will be simulated with installing Kafka in a VM)
+
 * Configure MirrorMaker for replication of Kafka Events
+
 * Deploy Databricks Cluster [WIP]
+
 * Setup a sample spark code to read from the HDI Kafka instance [WIP]
+
+  
+
+## How Kafka Mirroring Works
+
+Mirroring works by using Mirrormaker tool (part of Apache Kafka) to consume records from one topic on the primary cluster and then by creating a copy on the secondary or the target cluster.  The most useful mirroring setup for disaster recovery utilizes Kafka clusters in different Azure regions. To achieve this, the virtual networks where the clusters reside would be peered together. 
+
+The following diagram illustrates the mirroring process and how the communication happens between the clusters:
+
+![](./images/mirroring_process.jpg)
+
+[Source Article]([Mirror Apache Kafka topics - Azure HDInsight | Microsoft Docs](https://docs.microsoft.com/en-us/azure/hdinsight/kafka/apache-kafka-mirroring))
+
+The primary and the secondary clusters can have different configurations for number of nodes, partitions  and offsets and may have different topics in them as well. Mirroring maintains the key value that is used for partitioning, so the record is preserved on a per key basis. 
+
+Key considerations across networks:
+
+* Gateways: the network must be able to communicate at the TCP/IP level
+
+* Server Addressing: You can choose FQDN or the IP. In this particular lab, the clusters will be referred to by IPs. 
+
+  
+
+### Peering Setup
+
+Before we deploy our HDI and on-prem kafka instance, let's set up the following:
+
+* Resource Group where HDI would be deployed. 
+* Resource Group where Kafka On-prem will be deployed. Since we are simulating an on-prem environment, we are doing this by deploying a single node kafka VM inside another resource group. 
+* Set up VNETs for both resource groups. 
+* Create VNET peering between both VNETs. 
+* **Important** : Enable the VNET peering **before** deploying the HDI cluster, as otherwise the gateway information would need to be changed, and this may not be possible without a cluster restart and/or change in IPs. 
+
+
+
+![](./images/vnet_peering.jpg)
 
 
 
@@ -27,11 +68,79 @@ We'll keep all other options as default, for now. Click 'Review + Create'.
 
 ![](./images/deploy_hdi_2.jpg)
 
+Leave the options as default in the storage setup. 
+
+![](./images/deploy_hdi_2_a.jpg)
+
+**Important:**  Ensure that the VNET created for this HDI Cluster/Resource Group is selected in this page. 
+
+![](./images/deploy_hdi_2_b.jpg)
+
+
+
+Choose the size of the cluster. For our deployment, we will choose a cluster with 3 worker nodes. Sizing as a topic will not be covered in this article. 
+
+![](./images/deploy_hdi_2_c.jpg)
+
+
+
 Once all validations have succeeded, the cluster will get created. This deployment could take anywhere between 10-30 mins. 
 
 ![](./images/deploy_hdi_3.jpg)
 
+### Post Deployment Configuration on HDI
 
+Once the cluster has been successfully deployed, access Ambari from the cluster home page. 
+
+![](./images/ambari_1.jpg)
+
+Login to Ambari dashboard with the credentials provided during the cluster creation process. 
+
+Click on Kafka in the Ambari dashboard. 
+
+![](./images/ambari_2.jpg)
+
+
+
+This page will show the status of all the Ambari services. Click on 'Config' as we will make changes for IP Advertising (so that our services are accessible by IP) and also to ensure that our listener is listening on all IPs.
+
+In the config screen, open the 'Advanced kafka-env' block. 
+
+Add the following lines at the end of the config:
+
+```
+# Configure Kafka to advertise IP addresses instead of FQDN
+IP_ADDRESS=$(hostname -i)
+echo advertised.listeners=$IP_ADDRESS
+sed -i.bak -e '/advertised/{/advertised@/!d;}' /usr/hdp/current/kafka-broker/conf/server.properties
+echo "advertised.listeners=PLAINTEXT://$IP_ADDRESS:9092" >> /usr/hdp/current/kafka-broker/conf/server.properties
+```
+
+
+
+![](./images/ambari_4.jpg)
+
+
+
+In the kafka brokers section, change listeners property to `PLAINTEXT://0.0.0.0:9092`
+
+Click Save. Select 'restart' and 'Confirm restart all'.
+
+Post restart, validate that all services are up, using the Ambari dashboard. 
+
+*Tip*: The internal IPs for all kafka services are available in the hosts section in Ambari:
+
+Make a note of these IPs as we will need them later.  The naming convention is as follows:
+
+* hnx - Head Nodes
+
+* wnx - Kafka Broker Nodes
+
+* zkx - Kafka Zookeeper Nodes
+
+  
+
+![](./images/ambari_5.jpg)
 
 ### Access and configure Kafka on HDI post deployment
 
@@ -127,6 +236,13 @@ echo $KAFKABROKERS
 wn0-hdiscb.fuxxxxxxdlujcxxxxxaid.bx.internal.cloudapp.net:9092,wn1-hdiscb.fuxxxxxxdlujcxxxxxaid.bx.internal.cloudapp.net:9092
 ```
 
+Let's also create another variable to store the Kafka broker IPs and Zookeeper hosts
+
+```
+export SECONDARY_BROKERS=10.0.2.13:9092,10.0.2.7:9092,10.0.2.12:9092
+export SECONDARY_ZKHOSTS=10.0.2.10:2181,10.0.2.5:2181,10.0.2.11:2181
+```
+
 
 
 ### Setup On-Prem Kafka
@@ -194,6 +310,31 @@ source .bash_profile
 echo $JAVA_HOME
 ```
 
+Change server.properties to have the listener on the local ip of this host and advertise the IP
+
+The server.properties file is located in your kafka_directory/config. In our case it is at /kafka_2.13-2.7.0/config
+
+Change the following 3 settings in server.properties to the IP of the host where kafka is running.
+
+```
+listeners=PLAINTEXT://10.1.0.4:9092
+advertised.listeners=PLAINTEXT://10.1.0.4:9092
+zookeeper.connect=10.1.0.4:2181
+```
+
+Next, let's also change the consumer.properties in the same folder to also reflect the change. Change the following property as follows:
+
+```
+bootstrap.servers=10.1.0.4:9092
+group.id=mirrorgroup
+```
+
+Lastly, change the producer.properties as follows to ensure that all services are connecting to kafka on the correct ip and port:
+
+```
+bootstrap.servers=10.1.0.4:9092
+```
+
 Start the Kafka environment:
 
 ```
@@ -221,7 +362,7 @@ Let's create a topic to store events (open another terminal):
 ```
 cd kafka_2.13-2.7.0
 
-bin/kafka-topics.sh --create --topic quickstart-events --bootstrap-server localhost:9092
+bin/kafka-topics.sh --create --topic quickstart-events --bootstrap-server 10.1.0.4:9092
 
 Created topic quickstart-events.
 ```
@@ -229,7 +370,7 @@ Created topic quickstart-events.
 Let's validate the partition count of the new topic:
 
 ```
-bin/kafka-topics.sh --describe --topic quickstart-events --bootstrap-server localhost:9092
+bin/kafka-topics.sh --describe --topic quickstart-events --bootstrap-server 10.1.0.4:9092
 
 Topic: quickstart-events        PartitionCount: 1       ReplicationFactor: 1    Configs: segment.bytes=1073741824
         Topic: quickstart-events        Partition: 0    Leader: 0       Replicas: 0     Isr: 0
@@ -238,7 +379,7 @@ Topic: quickstart-events        PartitionCount: 1       ReplicationFactor: 1    
 Let's send some data to this topic with a console producer. (Ctrl+C to exit)
 
 ```
-bin/kafka-console-producer.sh --topic quickstart-events --bootstrap-server localhost:9092
+bin/kafka-console-producer.sh --topic quickstart-events --bootstrap-server 10.1.0.4:9092
 This is Event 1
 This is Event 2
 
@@ -247,7 +388,7 @@ This is Event 2
 Let's read this back from the console consumer:
 
 ```
-bin/kafkbin/kafka-console-consumer.sh --topic quickstart-events --from-beginning --bootstrap-server localhost:9092
+bin/kafkbin/kafka-console-consumer.sh --topic quickstart-events --from-beginning --bootstrap-server 10.1.0.4:9092
 This is Event 1
 This is Event 2
 ^CProcessed a total of 2 messages
@@ -280,11 +421,11 @@ nano consumer.properties
 Use the following text as the contents of the file:
 
 ```
-bootstrap.servers=PRIMARY_BROKERHOSTS
+bootstrap.servers=PRIMARY_BROKERS
 group.id=mirrorgroup
 ```
 
-Replace PRIMARY_BROKERHOSTS with the Broker IP address from the primary (on-prem) cluster.
+Replace PRIMARY_BROKERS with the Broker IP address from the primary (on-prem) cluster for e.g.
 
 ```
 bootstrap.servers=10.1.0.4:9092
@@ -306,7 +447,7 @@ nano producer.properties
 Use the following text as the contents of the `producer.properties` file (variable created during cluster setup):
 
 ```
-bootstrap.servers=KAFKABROKERS
+bootstrap.servers=SECONDARY_BROKERS
 compression.type=none
 ```
 
@@ -363,11 +504,9 @@ bin/kafka-console-producer.sh --topic quickstart-events --bootstrap-server 10.1.
 
 Target: 
 
-SECONDARY_BROKERHOSTS has the IPs of all the HDI Brokers:
+SECONDARY_BROKERS has the IPs of all the HDI Brokers:
 
 ```
-export SECONDARY_BROKERHOSTS=10.0.2.13:9092,10.0.2.7:9092,10.0.2.12:9092
-
 /usr/hdp/current/kafka-broker/bin/kafka-console-consumer.sh --bootstrap-server $SECONDARY_BROKERHOSTS --topic quickstart-events --from-beginning
 This is Test Message 1
 This is Test Message 2
