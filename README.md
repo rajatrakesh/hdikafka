@@ -8,8 +8,8 @@ In this tutorial, we would be going through the following steps:
 * Access and configure Kafka on HDI post deployment
 * Setup On-prem Kafka Instance (this will be simulated with installing Kafka in a VM)
 * Configure MirrorMaker for replication of Kafka Events
-* Deploy Databricks Cluster
-* Setup a sample spark code to read from the HDI Kafka instance
+* Deploy Databricks Cluster [WIP]
+* Setup a sample spark code to read from the HDI Kafka instance [WIP]
 
 
 
@@ -247,7 +247,7 @@ This is Event 2
 Let's read this back from the console consumer:
 
 ```
-bin/kafka-console-consumer.sh --topic quickstart-events --from-beginning --bootstrap-server localhost:9092
+bin/kafkbin/kafka-console-consumer.sh --topic quickstart-events --from-beginning --bootstrap-server localhost:9092
 This is Event 1
 This is Event 2
 ^CProcessed a total of 2 messages
@@ -257,7 +257,7 @@ Reference: [Apache Kafka](https://kafka.apache.org/quickstart)
 
 ### Configure MirrorMaker for replication of Kafka Events
 
-Kafka MirrorMaker allows for the "mirroring" of a stream. Given source and destination Kafka clusters, MirrorMaker will ensure any messages sent to the source cluster will be received by both the source *and* destination clusters. In this example, we'll show how to mirror a source Kafka cluster with a destination Kafka-enabled Event Hub. This scenario can be used to send data from an existing Kafka pipeline to Event Hubs without interrupting the flow of data.
+Kafka MirrorMaker allows for the "mirroring" of a stream. Given source and destination Kafka clusters, MirrorMaker will ensure any messages sent to the source cluster will be received by both the source *and* destination clusters. In this example, we'll show how to mirror a source Kafka cluster with a destination Kafka-enabled HDInsight cluster. This scenario can be used to send data from an existing Kafka pipeline on-premises to Kafka running on Azure without interrupting the flow of data.
 
 Check out the [Kafka Mirroring/MirrorMaker Guide](https://cwiki.apache.org/confluence/pages/viewpage.action?pageId=27846330) for more detailed information on Kafka MirrorMaker. 
 
@@ -269,31 +269,135 @@ To configure Kafka MirrorMaker, we'll give it a Kafka cluster as its consumer/so
 
 Consumer configuration:
 
-Update the consumer configuration file `source-kafka.config`, which tells MirrorMaker the properties of the source Kafka cluster.
-
-source-kafka.config
+A consumer.properties file is used to configure communication with the primary cluster. To create the file, use the following commands. 
 
 ```
-sdfsd
+#ssh to your HDI Kafka Cluster
+ssh sshuser@HDIKAFKACLUSTER-ssh.azurehdinsight.net
+nano consumer.properties
+```
+
+Use the following text as the contents of the file:
 
 ```
+bootstrap.servers=PRIMARY_BROKERHOSTS
+group.id=mirrorgroup
+```
+
+Replace PRIMARY_BROKERHOSTS with the Broker IP address from the primary (on-prem) cluster.
+
+```
+bootstrap.servers=10.1.0.4:9092
+group.id=mirrorgroup
+```
+
+This file describes the consumer information to use when reading from the primary Kafka cluster. For more information consumer configuration, see [Consumer Configs](https://kafka.apache.org/documentation#consumerconfigs) at kafka.apache.org.
+
+To save the file, use **Ctrl + X**, **Y**, and then **Enter**.
 
 Producer Configuration
 
-Now update the producer config file `mirror-hdikafka.config`, which tells MirrorMaker to send the duplicated (or "mirrored") data to the HDI Kafka service. Specifically change `bootstrap.servers` 
-
-mirror-hdikafka.config
+A `producer.properties` file is used to communicate the **secondary** cluster. To create the file, use the following command:
 
 ```
+nano producer.properties
+```
 
+Use the following text as the contents of the `producer.properties` file (variable created during cluster setup):
 
 ```
+bootstrap.servers=KAFKABROKERS
+compression.type=none
+```
+
+Replace KAFKABROKERS with the Broker IPs of the HDI Cluster.
+
+```
+bootstrap.servers=10.0.2.13:9092,10.0.2.7:9092,10.0.2.15:9092
+compression.type=none
+```
+
+For more information producer configuration, see [Producer Configs](https://kafka.apache.org/documentation#producerconfigs) at kafka.apache.org.
+
+The default configuration for Kafka on HDInsight doesn't allow the automatic creation of topics. You must use one of the following options before starting the Mirroring process:
+
+This option also allows you to set the number of partitions and the replication factor.
+
+You can create topics ahead of time by using the following command:
+
+```
+/usr/hdp/current/kafka-broker/bin/kafka-topics.sh --create --replication-factor 2 --partitions 3 --topic quickstart-events --zookeeper $SECONDARY_ZKHOSTS
+```
+
+**Configure the cluster for automatic topic creation**: This option allows MirrorMaker to automatically create topics, however it may create them with a different number of partitions or replication factor than the primary topic.
+
+To configure the secondary cluster to automatically create topics, perform these steps:
+
+1. Go to the Ambari dashboard for the secondary cluster: `https://SECONDARYCLUSTERNAME.azurehdinsight.net`.
+2. Click **Services** > **Kafka**. Click the **Configs** tab.
+3. In the **Filter** field, enter a value of `auto.create`. This filters the list of properties and displays the `auto.create.topics.enable` setting.
+4. Change the value of `auto.create.topics.enable` to true, and then select **Save**. Add a note, and then select **Save** again.
+5. Select the **Kafka** service, select **Restart**, and then select **Restart all affected**. When prompted, select **Confirm restart all**.
 
 Run MirrorMaker
 
-Run the Kafka MirrorMaker script from the root Kafka directory using the newly updated configuration files. Make sure to update the path of the config files (or copy them to the root Kafka directory) in the following command.
+Run the Kafka MirrorMaker from the ssh connection of the HDI Cluster: 
 
 ```
-bin/kafka-mirror-maker.sh --consumer.config source-kafka.config --num.streams 1 --producer.config mirror-hdikafka.config --whitelist=".*"
+/usr/hdp/current/kafka-broker/bin/kafka-run-class.sh kafka.tools.MirrorMaker --consumer.config consumer.properties --producer.config producer.properties --whitelist testtopic --num.streams 3
+```
+
+No messages are displayed in the console for MirrorMaker. Ideally, this would be a process that would be configured to execute one the kafka cluster starts. Mirrormaker allows whitelisting of topics, so there would be 1 MirrorMaker executable process for every source cluster being replicated into the target. 
+
+Let's test to check if the process is working by sending a few messages using the kafka-console-producer in the source cluster, and test if they have been replicated in the destination cluster by using kafka-console-consumer. 
+
+Source:
+
+```
+cd kafka_2.13-2.7.0
+bin/kafka-console-producer.sh --topic quickstart-events --bootstrap-server 10.1.0.4:9092
+>This is Test Message 1
+>This is Test Message 2
+>This is Test Message 3
+```
+
+Target: 
+
+SECONDARY_BROKERHOSTS has the IPs of all the HDI Brokers:
+
+```
+export SECONDARY_BROKERHOSTS=10.0.2.13:9092,10.0.2.7:9092,10.0.2.12:9092
+
+/usr/hdp/current/kafka-broker/bin/kafka-console-consumer.sh --bootstrap-server $SECONDARY_BROKERHOSTS --topic quickstart-events --from-beginning
+This is Test Message 1
+This is Test Message 2
+This is Test Message 3
+```
+
+If you go to the previous producer window for the source, and send in additional messages, you would be able to see them coming in real time. 
+
+As we might have multiple clusters deployed, let's also check how are clusters are performing with messages coming in from source. 
+
+Kafka Consumer Offset checker command line is used to assess how the mirror is keeping up with the source. Offset checker checks the number of messages read and written, and reports the lag for each consumer in a specified consumer group. 
+
+The following command runs the Consumer Offset Checker for group mirrorgroup, topic quickstart-events. The --zkconnect argument points to the Zookeeper host and port on the source cluster. 
+
+```
+/usr/hdp/current/kafka-broker/bin/kafka-run-class.sh kafka.tools.ConsumerOffsetChecker --group mirrorgroup --zkconnect 10.1.0.4:2181 --topic quickstart-events
+
+Group        Topic                Pid Offset     logSize     Lag     Owner
+mirrorgroup  quickstart-events     0   5          5           0       none
+```
+
+**Important** : After version 0.9.0.0, kafka.tools.ConsumerOffsetChecker is no longer supported and will result in a class not found error. The command to be used is kafka-consumer-groups to manage consumer groups. 
+
+This tool is primarily used for describing consumer groups and debugging any consumer offset issues, like consumer lag. The output from the tool shows the log and consumer offsets for each partition connected to the consumer group that is being described. You can see at a glance which consumers are current with their partition and which ones are lagging. From there, you can determine which partitions (and likely the corresponding brokers) are slow.
+
+```
+/usr/hdp/current/kafka-broker/bin/kafka-consumer-groups.sh --bootstrap-server 10.1.0.4:9092 --describe --group mirrorgroup
+Consumer group 'mirrorgroup' has no active members.
+
+TOPIC             PARTITION  CURRENT-OFFSET  LOG-END-OFFSET  LAG             CONSUMER-ID     HOST            CLIENT-ID
+quickstart-events 0          35              35              0               -               -               
 ```
 
